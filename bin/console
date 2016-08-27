@@ -1,0 +1,65 @@
+#!/usr/bin/env ruby
+
+require 'ruby2lua'
+
+luacode = Ruby2Lua.compile!(
+  <<-CODE
+require 'luatest.stdlib.base'
+
+class Object
+  def class; @class end
+end
+
+class Class
+  def to_s; @name end
+end
+
+class Greeter
+  def initialize(name, age)
+    @name = name
+    @age = age
+  end
+
+  def say_hello
+    print "hello", @name
+    @name
+  end
+end
+
+g = Greeter.new("Joy", 12)
+g.say_hello
+
+class Point
+  def initialize(x, y)
+    @x = x
+    @y = y
+  end
+
+  def magnitude
+    #Math.sqrt (@x^2) + (@y^2)
+  end
+
+  def x; @x end
+  def y; @y end
+end
+
+p = Point.new(3, 4)
+
+print("p.x = ", p.x)
+print("p.y = ", p.y)
+
+print(p.magnitude)
+print(p.class.to_s)
+
+CODE
+)
+
+puts "====================output======================="
+puts luacode.to_lines_with_no
+
+f = File.new("luatest/output.lua","w")
+f.write(luacode)
+f.close
+
+puts "====================result======================="
+system "luajit luatest/output.lua"
