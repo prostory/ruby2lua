@@ -41,6 +41,21 @@ module Ruby2Lua
       str << '"'
     end
 
+    def visit_quote(node)
+      str << node.code
+    end
+
+    def visit_d_string(node)
+      str << '"'
+      str << node.values.first.to_s
+      str << '"'
+      node.values[1..-1].each do |value|
+        str << '..'
+        value.accept self
+      end
+      false
+    end
+
     def visit_variable(node)
       str << node.name.to_s
     end
@@ -91,6 +106,7 @@ module Ruby2Lua
     end
 
     def visit_assign(node)
+      str << 'local ' if node.target.class == Variable
       node.target.accept self
       str << ' = '
       node.value.accept self
@@ -100,29 +116,45 @@ module Ruby2Lua
     def visit_module_def(node)
       node.name.accept self
       str << ' = '
+      str << 'Object:newclass('
       node.name.accept self
-      str << " or Object:new(\"#{node.name.name}\")\n"
+      str << ", \"#{node.name.name}\")\n"
+      str << "local self = #{node.name.name}:class()\n"
+      indent
+      node.name.accept self
+      str << " = self\n"
       node.body.accept self
       false
     end
 
     def visit_class_def(node)
-      node.name.accept self
-      str << ' = '
-      node.name.accept self
-      str << ' or '
-      if node.superclass
-        node.superclass.accept self
-      else
-        str << 'Object'
+      str << "do\n"
+      with_indent do
+        indent
+        str << 'local '
+        str << 'self, __base = '
+        if node.superclass
+          node.superclass.accept self
+        else
+          str << 'Object'
+        end
+        str << ':newclass('
+        node.name.accept self
+        str << ", \"#{node.name.name}\")\n"
+        indent
+        node.name.accept self
+        str << " = self\n"
+        node.body.accept self
       end
-      str << ":new(\"#{node.name.name}\")\n"
-      node.body.accept self
+      indent
+      str << 'end'
       false
     end
 
     def visit_def(node)
-      str << "function #{node.owner.name}:#{node.name}(#{node.args.map(&:name).join ', '})\n"
+      str << 'function '
+      str << "__base:" if node.owner
+      str << "#{node.name}(#{node.args.map(&:name).join ', '})\n"
       if !node.body.last.is_a?(Return)
         if node.body.last.is_a?(Assign)
           node.body << Return.new(node.body.last.target)
@@ -133,6 +165,26 @@ module Ruby2Lua
       with_indent do
         node.body.accept self
       end
+      indent
+      str << 'end'
+      false
+    end
+
+    def visit_static_def(node)
+      str << 'function '
+      str << "#{node.owner.name}:" if node.owner
+      str << "#{node.name}(#{node.args.map(&:name).join ', '})\n"
+      if !node.body.last.is_a?(Return)
+        if node.body.last.is_a?(Assign)
+          node.body << Return.new(node.body.last.target)
+        else
+          node.body << Return.new(node.body.children.pop)
+        end
+      end
+      with_indent do
+        node.body.accept self
+      end
+      indent
       str << 'end'
       false
     end

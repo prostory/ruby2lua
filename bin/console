@@ -7,7 +7,9 @@ luacode = Ruby2Lua.compile!(
 require 'luatest.stdlib.base'
 
 class Object
-  def class; @class end
+  def to_s
+    self.class.to_s
+  end
 end
 
 class Class
@@ -20,12 +22,15 @@ class Greeter
     @age = age
   end
 
+  def self.foo
+    print "foo"
+  end
+
   def say_hello
     print "hello", @name
     @name
   end
 end
-
 g = Greeter.new("Joy", 12)
 g.say_hello
 
@@ -42,14 +47,16 @@ class Point
   def x; @x end
   def y; @y end
 end
-
 p = Point.new(3, 4)
 
 print("p.x = ", p.x)
 print("p.y = ", p.y)
 
 print(p.magnitude)
-print(p.class.to_s)
+
+print "the class of p is \#{p.class}"
+
+print Greeter.foo
 
 CODE
 )

@@ -138,6 +138,50 @@ module Ruby2Lua
     end
   end
 
+  class Quote < ASTNode
+    attr_accessor :code
+
+    def initialize(code)
+      @code = code.to_s
+    end
+
+    def to_s
+      @code
+    end
+
+    def ==(other)
+      other.class == self.class && other.code == code
+    end
+
+    def simple_clone
+      self.class.new code
+    end
+  end
+
+  class DString < ASTNode
+    attr_accessor :values
+
+    def initialize(values = [])
+      @values = Array.from values
+    end
+
+    def accept_children(visitor)
+      values.each {|value| value.accept visitor}
+    end
+
+    def to_s
+      "(return #{value.join ' '})"
+    end
+
+    def ==(other)
+      other.class == self.class && other.values == values
+    end
+
+    def simple_clone
+      self.class.new values
+    end
+  end
+
   class Variable < ASTNode
     attr_accessor :name
 

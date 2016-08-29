@@ -64,6 +64,15 @@ module Ruby2Lua
     rule(:str)      do |s|
       StringLit.new s.first
     end
+    rule(:xstr)     do |s|
+      Quote.new s.first
+    end
+    rule(:evstr)    do |s|
+      Call.new(:to_s, [], s.first)
+    end
+    rule(:dstr)     do |s|
+      DString.new(s)
+    end
     rule(:lvar)     do |s|
       Variable.new s.first
     end
