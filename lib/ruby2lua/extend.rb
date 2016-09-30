@@ -25,6 +25,12 @@ class String
   end
 end
 
+class Symbol
+  def underscore
+    to_s.underscore.to_sym
+  end
+end
+
 class Array
   def self.from(obj)
     case obj

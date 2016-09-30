@@ -8,8 +8,8 @@ module Ruby2Lua
   def self.compile!(code)
     sexp = RubyParser.new.parse(code)
     codegen = CodeGenVisitor.new
-    pp sexp
-    ASTTransform.new.apply(sexp).accept(codegen)
+    #pp sexp
+    Transform.new.apply(sexp).accept(codegen)
     codegen.to_s
   end
 end

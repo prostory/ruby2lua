@@ -1,192 +1,214 @@
 module Ruby2Lua
-  class Call
-    def mangled_name
+  class Scope
+    attr_accessor :name
+    attr_accessor :def
+    attr_accessor :vars
 
+    def initialize(name, a_def, vars)
+      @name = name
+      @def = a_def
+      @vars = vars
+    end
+
+    def to_s
+      name.to_s
+    end
+  end
+
+  class TopScope < Scope
+    def initialize
+      @name = :_TOP
+      @def = nil
+      @vars = {}
     end
   end
 
   class CodeGenVisitor < Visitor
-    attr_accessor :str
+    attr_accessor :file
 
-    def initialize(str = nil, indent_len = 2)
-      @str = str || ''
+    def initialize(file = nil, indent_len = 2)
+      @file = file || ''
       @indent = 0
       @indent_len = indent_len
-    end
-
-    def visit_expressions(node)
-      node.each do |child|
-        indent
-        child.accept self
-        str << "\n"
-      end
-      false
+      @top_scope = TopScope.new
+      @scopes = [@top_scope]
     end
 
     def visit_block(node)
-      visit_expressions node
+      with_indent {
+        node.each do |child|
+          indent
+          child.accept self
+          file << "\n"
+        end
+      }
+      false
     end
 
-    def visit_nil_lit(node)
-      str << 'nil'
+    def visit_nil(node)
+      file << 'nil'
     end
 
-    def visit_number_lit(node)
-      str << node.value.to_s
+    def visit_lit(node)
+      file << node.value.to_s
     end
 
-    def visit_string_lit(node)
-      str << '"'
-      str << node.value.to_s
-      str << '"'
+    def visit_true(node)
+      file << 'true'
     end
 
-    def visit_quote(node)
-      str << node.code
+    def visit_false(node)
+      file << 'false'
     end
 
-    def visit_d_string(node)
-      str << '"'
-      str << node.values.first.to_s
-      str << '"'
-      node.values[1..-1].each do |value|
-        str << '..'
+    def visit_str(node)
+      file << '"'
+      file << node.value.to_s
+      file << '"'
+    end
+
+    def visit_xstr(node)
+      file << node.value.to_s
+    end
+
+    def visit_dstr(node)
+      file << '"'
+      file << node.string
+      file << '"'
+      node.values.each do |value|
+        file << ' .. '
         value.accept self
       end
       false
     end
 
-    def visit_variable(node)
-      str << node.name.to_s
+    def visit_lvar(node)
+      file << node.name.to_s
     end
 
-    def visit_instance_var(node)
-      str << "self[\"#{node.name}\"]"
+    def visit_ivar(node)
+      file << "self[\"@#{node.name.to_s}\"]"
     end
 
-    def visit_class_var(node)
-      str << "self[\"#{node.name}\"]"
+    def visit_cvar(node)
+      file << "self[\"@@#{node.name.to_s}\"]"
     end
 
-    def visit_argument(node)
-      str << node.name.to_s
+    def visit_gvar(node)
+      file << "_G[\"$#{node.name.to_s}\"]"
+    end
+
+    def visit_self(node)
+      file << 'self'
     end
 
     def visit_const(node)
-      if node.owner
-        node.owner.accept self
-        str << '.'
-      end
-      str << "#{node.name}"
+      file << scope.to_s
+      file << '_'
+      file << node.name.to_s
+    end
+
+    def visit_colon2(node)
+      node.owner.accept self
+      file << '_'
+      file << node.name.to_s
       false
+    end
+
+    def visit_colon3(node)
+      file << top_scope.to_s
+      file << '_'
+      file << node.name.to_s
     end
 
     def visit_call(node)
       if node.obj
         node.obj.accept self
-        str << ':'
+        file << ':'
       end
-      str << "#{node.name}"
-      str << '('
+      file << node.name.to_s
+      file << '('
       node.args.each_with_index do |arg, idx|
-        str << ', ' if idx > 0
+        file << ', ' if idx > 0
         arg.accept self
       end
-      str << ')'
+      file << ')'
       false
     end
 
-    def visit_return(node)
-      str << 'return '
-      node.values.each_with_index do |value, idx|
-        str << ', ' if idx > 0
-        value.accept self
+    def visit_lasgn(node)
+      unless scope.vars.has_key? node.target.name
+        scope.vars[node.target.name] = true
+        file << 'local '
       end
-      false
-    end
-
-    def visit_assign(node)
-      str << 'local ' if node.target.class == Variable
       node.target.accept self
-      str << ' = '
+      file << ' = '
       node.value.accept self
       false
     end
 
-    def visit_module_def(node)
-      node.name.accept self
-      str << ' = '
-      str << 'Object:newclass('
-      node.name.accept self
-      str << ", \"#{node.name.name}\")\n"
-      str << "local self = #{node.name.name}:class()\n"
-      indent
-      node.name.accept self
-      str << " = self\n"
-      node.body.accept self
+    def visit_iasgn(node)
+      node.target.accept self
+      file << ' = '
+      node.value.accept self
       false
     end
 
-    def visit_class_def(node)
-      str << "do\n"
-      with_indent do
-        indent
-        str << 'local '
-        str << 'self, __base = '
-        if node.superclass
-          node.superclass.accept self
-        else
-          str << 'Object'
-        end
-        str << ':newclass('
-        node.name.accept self
-        str << ", \"#{node.name.name}\")\n"
-        indent
-        node.name.accept self
-        str << " = self\n"
-        node.body.accept self
-      end
-      indent
-      str << 'end'
+    def visit_cvasgn(node)
+      node.target.accept self
+      file << ' = '
+      node.value.accept self
       false
     end
 
-    def visit_def(node)
-      str << 'function '
-      str << "__base:" if node.owner
-      str << "#{node.name}(#{node.args.map(&:name).join ', '})\n"
-      if !node.body.last.is_a?(Return)
-        if node.body.last.is_a?(Assign)
-          node.body << Return.new(node.body.last.target)
-        else
-          node.body << Return.new(node.body.children.pop)
-        end
-      end
-      with_indent do
-        node.body.accept self
-      end
-      indent
-      str << 'end'
+    def visit_gasgn(node)
+      node.target.accept self
+      file << ' = '
+      node.value.accept self
       false
     end
 
-    def visit_static_def(node)
-      str << 'function '
-      str << "#{node.owner.name}:" if node.owner
-      str << "#{node.name}(#{node.args.map(&:name).join ', '})\n"
-      if !node.body.last.is_a?(Return)
-        if node.body.last.is_a?(Assign)
-          node.body << Return.new(node.body.last.target)
-        else
-          node.body << Return.new(node.body.children.pop)
-        end
-      end
-      with_indent do
+    def visit_cdecl(node)
+      node.target.accept self
+      file << ' = '
+      node.value.accept self
+      false
+    end
+
+    def visit_module(node)
+      node.name.accept self
+      file << " = {}\n"
+      file << "do\n"
+      with_new_scope(node.name.name, nil) do
         node.body.accept self
       end
-      indent
-      str << 'end'
+      file << 'end'
       false
+    end
+
+    def visit_class(node)
+      node.name.accept self
+      file << " = {}\n"
+      file << "do\n"
+      with_new_scope(node.name.name, nil) do
+        node.body.accept self
+      end
+      file << 'end'
+      false
+    end
+
+    def with_new_scope(name, a_def)
+      @scopes.push(Scope.new(name, a_def, {}))
+      yield
+      @scopes.pop
+    end
+
+    def top_scope
+      @top_scope
+    end
+
+    def scope
+      @scopes.last
     end
 
     def with_indent
@@ -196,11 +218,11 @@ module Ruby2Lua
     end
 
     def indent
-      str << (' ' * @indent_len * @indent)
+      file << (' ' * @indent_len * @indent)
     end
 
     def to_s
-      str.strip
+      file.strip
     end
   end
 end

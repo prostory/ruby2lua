@@ -5,6 +5,7 @@ module Ruby2Lua
   end
 
   class ASTNode
+    include Enumerable
     attr_accessor :location
     attr_accessor :sequence
 
@@ -44,81 +45,34 @@ module Ruby2Lua
     end
   end
 
-  class Expressions < ASTNode
-    include Enumerable
+  class ASTLeaf < ASTNode
+    attr_accessor :token
 
-    attr_accessor :children
-
-    def self.from(obj)
-      case obj
-      when nil
-        new
-      when Array
-        new obj
-      when Expressions, Do
-        new obj.children
-      else
-        new [obj]
-      end
-    end
-
-    def initialize(expressions = [])
-      @children = expressions
-    end
-
-    def each(&block)
-      children.each(&block)
+    def initialize(sexp)
+      @token = sexp.first
     end
 
     def [](i)
-      children[i]
+      raise "has no any child for #{token}"
     end
 
-    def <<(child)
-      children << child
+    alias child []
+    alias value token
+
+    def each
+      yield
     end
 
-    def last
-      children.last
-    end
-
-    def any?
-      children.any?
-    end
-
-    def accept_children(visitor)
-      children.each { |child| child.accept(visitor) }
+    def size
+      0
     end
 
     def ==(other)
-      other.class == self.class && other.children == children
+      other.class = self.class && other.token == token
     end
 
     def to_s
-      "(#{children.join ' '})"
-    end
-
-    def simple_clone
-      self.class.new children.map(&:clone)
-    end
-  end
-
-  class Block < Expressions
-  end
-
-  class Lit < ASTNode
-    attr_accessor :value
-
-    def initialize(value)
-      @value = value
-    end
-
-    def to_s
-      @value.to_s
-    end
-
-    def ==(other)
-      other.class == self.class && other.value == value
+      token.to_s
     end
 
     def simple_clone
@@ -126,307 +80,428 @@ module Ruby2Lua
     end
   end
 
-  class NilLit < ASTNode
-  end
+  class ASTList < ASTNode
+    attr_accessor :children
 
-  class NumberLit < Lit
-  end
-
-  class StringLit < Lit
-    def initialize(value)
-      @value = value.to_s
-    end
-  end
-
-  class Quote < ASTNode
-    attr_accessor :code
-
-    def initialize(code)
-      @code = code.to_s
+    def self.from(obj)
+      case obj
+      when nil
+        new []
+      when ::Array
+        new obj
+      when self
+        new obj.children
+      else
+        new [obj]
+      end
     end
 
-    def to_s
-      @code
+    def initialize(sexp)
+      @children = ::Array.from sexp
     end
 
-    def ==(other)
-      other.class == self.class && other.code == code
+    def [](i)
+      children[i]
     end
 
-    def simple_clone
-      self.class.new code
+    alias child []
+
+    def size
+      children.size
     end
-  end
 
-  class DString < ASTNode
-    attr_accessor :values
-
-    def initialize(values = [])
-      @values = Array.from values
+    def each
+      children.each { |child| yield child }
     end
 
     def accept_children(visitor)
-      values.each {|value| value.accept visitor}
+      children.each { |child| child.accept(visitor) if child.is_a?(ASTNode) }
     end
 
-    def to_s
-      "(return #{value.join ' '})"
-    end
-
-    def ==(other)
-      other.class == self.class && other.values == values
-    end
-
-    def simple_clone
-      self.class.new values
-    end
-  end
-
-  class Variable < ASTNode
-    attr_accessor :name
-
-    def initialize(name)
-      @name = name
-    end
-
-    def to_s
-      @name.to_s
+    def location
+      children.find {|child| child.location != nil}
     end
 
     def ==(other)
-      other.class == self.class && other.name == name
-    end
-
-    def simple_clone
-      self.class.new name
-    end
-  end
-
-  class InstanceVar < Variable
-  end
-
-  class ClassVar < Variable
-  end
-
-  class Argument < Variable
-  end
-
-  class Const < ASTNode
-    attr_accessor :name
-    attr_accessor :owner
-
-    def initialize(name, owner = nil)
-      @name = name
-      @owner = owner
-    end
-
-    def accept_children(visitor)
-      owner.accept visitor if owner
-    end
-
-    def ==(other)
-      other.class == self.class && other.name == name &&
-        other.owner == owner
+      other.class == self.class && other.children == children
     end
 
     def to_s
-      str = owner ? "#{owner}:" : ''
-      str << name.to_s
+      "(#{children.join(' ')})"
     end
 
     def simple_clone
-      self.class.new name, owner.clone
+      self.class.new children.map { |child| child.clone if child.is_a?(ASTNode) }
     end
   end
 
-  class Call < ASTNode
-    attr_accessor :name
-    attr_accessor :args
-    attr_accessor :obj
-
-    def initialize(name, args = [], obj = nil)
-      @name = name
-      @args = Array.from args
-      @obj = obj
+  class Block < ASTList
+    def empty?
+      children.empty?
     end
 
-    def accept_children(visitor)
-      args.each { |arg| arg.accept(visitor) }
-      obj.accept visitor if obj
-    end
-
-    def ==(other)
-      other.class == self.class && other.name == name &&
-        other.args == args && other.obj == obj
-    end
-
-    def to_s
-      str = '('
-      str << "#{obj}:" if obj
-      str << name.to_s
-      str << " #{args.join(' ')}" if args.any?
-      str << ')'
-    end
-
-    def simple_clone
-      self.class.new name, args, obj
+    def last
+      children.last
     end
   end
 
-  class Return < ASTNode
-    attr_accessor :values
+  class Nil < ASTLeaf
+  end
 
-    def initialize(values = [])
-      @values = Array.from values
+  class Lit < ASTLeaf
+  end
+
+  class True < ASTLeaf
+  end
+
+  class False < ASTLeaf
+  end
+
+  class Str < ASTLeaf
+  end
+
+  class Xstr < ASTLeaf
+  end
+
+  class Evstr < ASTList
+    def initialize(list)
+      super([Call.from(:to_s, [], list[0])])
     end
 
-    def accept_children(visitor)
-      values.each {|value| value.accept visitor}
-    end
-
-    def to_s
-      "(return #{value.join ' '})"
-    end
-
-    def ==(other)
-      other.class == self.class && other.values == values
-    end
-
-    def simple_clone
-      self.class.new values
+    def value
+      child(0)
     end
   end
 
-  class Assign < ASTNode
-    attr_accessor :target
-    attr_accessor :value
-
-    def initialize(target, value)
-      @target = target
-      @value = value
+  class Dstr < ASTList
+    def string
+      child(0)
     end
 
-    def accept_children(visitor)
-      target.accept visitor
-      value.accept visitor
-    end
-
-    def to_s
-      "(set #{target} #{value})"
-    end
-
-    def ==(other)
-      other.class == self.class && other.target == target &&
-        other.value == value
-    end
-
-    def simple_clone
-      self.class.new target, value
+    def values
+      children[1..-1]
     end
   end
 
-  class ModuleDef < ASTNode
-    attr_accessor :name
-    attr_accessor :body
+  class Lvar < ASTLeaf
+    alias name value
+  end
 
-    def initialize(name, body = [])
-      @name = name
-      body.each {|child| child.owner = name if child.respond_to?(:owner) && child.owner.nil? }
-      @body = Expressions.from body
-    end
-
-    def accept_children(visitor)
-      name.accept visitor
-      body.accept visitor
-    end
-
-    def ==(other)
-      other.class == self.class && other.name == name &&
-        other.body = body
-    end
-
-    def to_s
-      str = '(module '
-      str << name.to_s
-      str << " #{body}" if body.any?
-      str << ')'
-      str
-    end
-
-    def simple_clone
-      self.class.new name, body
+  class Ivar < Lvar
+    def initialize(sexp)
+      @token = sexp[0].to_s.gsub(/^@/, '').to_sym
     end
   end
 
-  class ClassDef < ModuleDef
-    attr_accessor :superclass
-
-    def initialize(name, body = [], superclass = nil)
-      super(name, body)
-      @superclass = superclass
-    end
-
-    def accept_children(visitor)
-      super visitor
-      superclass.accept visitor if superclass
-    end
-
-    def ==(other)
-      super && other.superclass == superclass
-    end
-
-    def to_s
-      str = '(class '
-      str << name.to_s
-      str << " extend #{superclass}" if superclass
-      str << " #{body}" if body.any?
-      str << ')'
-      str
-    end
-
-    def simple_clone
-      self.class.new name, body, superclass
+  class Cvar < Lvar
+    def initialize(sexp)
+      @token = sexp[0].to_s.gsub(/^@@/, '').to_sym
     end
   end
 
-  class Def < ASTNode
-    attr_accessor :name
-    attr_accessor :args
-    attr_accessor :body
-    attr_accessor :owner
-
-    def initialize(name, args = [], body = [], owner = nil)
-      @name = name
-      @args = Array.from args
-      @body = Expressions.from body
-      @owner = owner
-    end
-
-    def ==(other)
-      other.class == self.class && other.name == name && other.args == args &&
-        other.body == body && other.owner == owner
-    end
-
-    def accept_children(visitor)
-      args.each {|arg| arg.accept visitor}
-      body.accept visitor
-      owner.accept visitor if owner
-    end
-
-    def to_s
-      str = '(def '
-      str << "#{owner}:" if owner
-      str << name.to_s
-      str << "(#{args.join ' '})" if args.any?
-      str << " #{body}" if body.any?
-      str << ')'
-    end
-
-    def simple_clone
-      self.class.new name, args, body, owner
+  class Gvar < Lvar
+    def initialize(sexp)
+      @token = sexp[0].to_s.gsub(/^\$/, '').to_sym
     end
   end
 
-  class StaticDef < Def
+  class Self < Lvar
+  end
+
+  class Const < ASTLeaf
+    alias name value
+
+    def owner
+      nil
+    end
+  end
+
+  class Colon2 < ASTList
+    def name
+      child(1)
+    end
+
+    def owner
+      child(0)
+    end
+  end
+
+  class Colon3 < Const
+  end
+
+  class Args < ASTList
+    alias values children
+  end
+
+  class Splat < ASTList
+    def value
+      child(0)
+    end
+  end
+
+  class Block_pass < ASTList
+    def value
+      child(0)
+    end
+  end
+
+  class Call < ASTList
+    def self.from(name, args = [], obj = nil)
+      self.new [obj, name, *args]
+    end
+
+    def name
+      child(1)
+    end
+
+    def obj
+      child(0)
+    end
+
+    def args
+      child(2..-1)
+    end
+  end
+
+  class Yield < ASTList
+    alias args children
+  end
+
+  class Return < ASTList
+    alias values children
+  end
+
+  class Lasgn < ASTList
+    def initialize(list)
+      @children = [Lvar.new([list[0]]), list[1]]
+    end
+
+    def target
+      child(0)
+    end
+
+    def value
+      child(1)
+    end
+  end
+
+  class Iasgn < Lasgn
+    def initialize(list)
+      @children = [Ivar.new([list[0]]), list[1]]
+    end
+  end
+
+  class Cvasgn < Lasgn
+    def initialize(list)
+      @children = [Cvar.new([list[0]]), list[1]]
+    end
+  end
+
+  class Gasgn < Lasgn
+    def initialize(list)
+      @children = [Gvar.new([list[0]]), list[1]]
+    end
+  end
+
+  class Cdecl < Lasgn
+    def initialize(list)
+      @children = [list[0].is_a?(ASTNode)? list[0] : Const.new([list[0]]), list[1]]
+    end
+  end
+
+  class Module < ASTList
+    def initialize(list)
+      @children = [Const.new([list[0]]), Block.from(list[1..-1])]
+    end
+
+    def name
+      child(0)
+    end
+
+    def body
+      child(1)
+    end
+  end
+
+  class Class < Module
+    def initialize(list)
+      @children = [Const.new([list[0]]), list[1]? Const.new([list[1]]) : nil, Block.from(list[2..-1])]
+    end
+
+    def superclass
+      child(1)
+    end
+
+    def body
+      child(2)
+    end
+  end
+
+  class Defn < ASTList
+    def initialize(list)
+      @children = [*list[0..1], Block.from(list[2..-1])]
+    end
+
+    def name
+      child(0)
+    end
+
+    def args
+      child(1)
+    end
+
+    def body
+      child(2)
+    end
+  end
+
+  class Defs < Defn
+    def initialize(list)
+      @children = [*list[0..2], Block.from(list[3..-1])]
+    end
+
+    def owner
+      child(0)
+    end
+
+    def name
+      child(1)
+    end
+
+    def args
+      child(2)
+    end
+
+    def body
+      child(3)
+    end
+  end
+
+  class If < ASTList
+    def initialize(list)
+      super([list[0], Block.from(list[1]), Block.from(list[2])])
+    end
+
+    def cond
+      child(0)
+    end
+
+    def then
+      child(1)
+    end
+
+    def else
+      child(2)
+    end
+  end
+
+  class While < ASTList
+    def initialize(list)
+      super([list[0], Block.from(list[1])])
+    end
+
+    def cond
+      child(0)
+    end
+
+    def body
+      child(1)
+    end
+  end
+
+  class Until < While
+  end
+
+  class Case < ASTList
+    def obj
+      child(0)
+    end
+
+    def branches
+      child(1..-2)
+    end
+
+    def else
+      child(-1)
+    end
+  end
+
+  class When < ASTList
+    def initialize(list)
+      super([list[0], Block.from(list[1..-1])])
+    end
+
+    def array
+      child(0)
+    end
+
+    def body
+      child(1)
+    end
+  end
+
+  class Rescue < ASTList
+    def initialize(list)
+      super([Block.from(list[0]), *list[1..-1]])
+    end
+
+    def body
+      child(0)
+    end
+
+    def resbody
+      child(1)
+    end
+  end
+
+  class Resbody < ASTList
+    def initialize(list)
+      super([list[0], Block.from(list[1..-1])])
+    end
+
+    def array
+      child(0)
+    end
+
+    def body
+      child(1)
+    end
+  end
+
+  class Ensure < ASTList
+    def initialize(list)
+      super([list[0], Block.from(list[1..-1])])
+    end
+
+    def rescue
+      child(0)
+    end
+    def body
+      child(1)
+    end
+  end
+
+  class Array < ASTList
+  end
+
+  class Hash < ASTList
+  end
+
+  class Iter < ASTList
+    def initialize(list)
+      super([*list[0..1], Block.from(list[2])])
+    end
+
+    def obj
+      child(0)
+    end
+
+    def args
+      child(1)
+    end
+
+    def body
+      child(2)
+    end
   end
 end
